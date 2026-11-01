@@ -33,6 +33,35 @@ jobs:
       - name: Lister les tâches du module app
         run: gradle --no-daemon :app:tasks --all
 
+      - name: Diagnostic configuration Android
+        run: |
+          echo "=== Répertoire courant ==="
+          pwd
+
+          echo "=== Fichiers Gradle du projet ==="
+          find . -maxdepth 3 -type f \( -name "*.gradle" -o -name "*.gradle.kts" \) -print
+
+          echo "=== Contenu de settings.gradle.kts ==="
+          if [ -f settings.gradle.kts ]; then
+            cat settings.gradle.kts
+          else
+            echo "settings.gradle.kts introuvable"
+          fi
+
+          echo "=== Contenu de build.gradle.kts ==="
+          if [ -f build.gradle.kts ]; then
+            cat build.gradle.kts
+          else
+            echo "build.gradle.kts introuvable"
+          fi
+
+          echo "=== Contenu de app/build.gradle.kts ==="
+          if [ -f app/build.gradle.kts ]; then
+            cat app/build.gradle.kts
+          else
+            echo "app/build.gradle.kts introuvable"
+          fi
+
       - name: Compiler APK
         run: gradle --no-daemon :app:assembleDebug
 
