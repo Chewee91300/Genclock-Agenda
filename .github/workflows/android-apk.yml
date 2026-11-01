@@ -1,42 +1,41 @@
-name: Construire Mon Agenda Alarmes
+name: Construire APK Android
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [ main ]
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Récupérer le code
+      - name: Récupérer le projet
         uses: actions/checkout@v4
 
-      - name: Installer Java 17
+      - name: Installer Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Installer Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Extraire le projet
-        run: unzip -q MonAgendaAlarmes-1.1.2.zip
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.9'
 
       - name: Compiler APK
-        working-directory: MonAgendaAlarmes
         run: gradle --no-daemon assembleDebug
 
       - name: Renommer APK
-        run: cp MonAgendaAlarmes/app/build/outputs/apk/debug/app-debug.apk MonAgendaAlarmes.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk MonAgendaAlarmes.apk
 
       - name: Publier APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: MonAgendaAlarmes
           path: MonAgendaAlarmes.apk
           if-no-files-found: error
-it
+          retention-days: 7
