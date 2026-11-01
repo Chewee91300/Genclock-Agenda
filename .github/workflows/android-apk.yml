@@ -1,3 +1,4 @@
+
 name: Construire APK Android
 
 on:
@@ -27,23 +28,37 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Vérifier la structure du projet
+      - name: Décompresser le projet Android
         run: |
-          echo "=== Racine du dépôt ==="
-          pwd
-          echo "=== Fichiers Gradle ==="
-          find . -maxdepth 3 -type f \( -name "*.gradle" -o -name "*.gradle.kts" \) -print
-          echo "=== Vérification du module Android ==="
-          test -f app/build.gradle.kts
-          cat app/build.gradle.kts
+          mkdir -p extracted
+          unzip -o MonAgendaAlarmes-1.1.2.zip -d extracted
 
-      - name: Vérifier les tâches Android
+          PROJECT_ROOT=$(find extracted -type f \
+            -path "*/app/build.gradle.kts" \
+            -print -quit | sed 's|/app/build.gradle.kts$||')
+
+          if [ -z "$PROJECT_ROOT" ]; then
+            echo "ERREUR : app/build.gradle.kts introuvable dans le ZIP"
+            find extracted -maxdepth 5 -type f
+            exit 1
+          fi
+
+          echo "Projet trouvé dans : $PROJECT_ROOT"
+          cp -a "$PROJECT_ROOT"/. "$GITHUB_WORKSPACE"/
+
+      - name: Vérifier le projet
+        run: |
+          test -f app/build.gradle.kts
+          test -f settings.gradle.kts
+          echo "Projet Android détecté"
+
+      - name: Vérifier les tâches Gradle
         run: gradle --no-daemon :app:tasks --all
 
       - name: Compiler APK
         run: gradle --no-daemon :app:assembleDebug
 
-      - name: Vérifier la présence de l'APK
+      - name: Vérifier APK
         run: test -f app/build/outputs/apk/debug/app-debug.apk
 
       - name: Renommer APK
