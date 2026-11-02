@@ -30,7 +30,7 @@ jobs:
       - name: Décompresser le projet Android
         run: |
           mkdir -p extracted
-          unzip -o MonAgendaAlarmes-1.1.30.zip -d extracted
+          unzip -o MonAgendaAlarmes-1.1.32.zip -d extracted
 
           PROJECT_ROOT=$(find extracted -type f \
             -path "*/app/build.gradle.kts" \
