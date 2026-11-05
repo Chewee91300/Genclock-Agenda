@@ -1,7 +1,14 @@
+
 name: Construire APK Android
 
 on:
   workflow_dispatch:
+    inputs:
+      archive_name:
+        description: "Nom exact de l'archive à compiler (vide = dernière version)"
+        required: false
+        type: string
+        default: ""
   push:
     branches: [ main ]
 
@@ -13,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Récupérer le projet
+      - name: Récupérer le dépôt
         uses: actions/checkout@v4
 
       - name: Installer Java
@@ -27,23 +34,46 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Décompresser le projet Android
+      - name: Sélectionner et décompresser la bonne archive
+        env:
+          REQUESTED_ARCHIVE: ${{ inputs.archive_name }}
         run: |
+          set -euo pipefail
           mkdir -p extracted
-          PROJECT_ZIP=$(find . -maxdepth 1 -type f -name '*.zip' -printf '%f\n' | sort -V | tail -n 1)
-          if [ -z "$PROJECT_ZIP" ]; then
-            echo "ERREUR : aucune archive ZIP du projet à la racine"
-            exit 1
+
+          if [ -n "$REQUESTED_ARCHIVE" ]; then
+            if [[ ! "$REQUESTED_ARCHIVE" =~ ^MonAgendaAlarmes-[0-9]+\.[0-9]+\.[0-9]+\.zip$ ]]; then
+              echo "::error::Nom d'archive invalide"
+              exit 1
+            fi
+            if [ ! -f "$REQUESTED_ARCHIVE" ]; then
+              echo "::error::Archive introuvable : $REQUESTED_ARCHIVE"
+              exit 1
+            fi
+            PROJECT_ZIP="$REQUESTED_ARCHIVE"
+          else
+            mapfile -t PROJECT_ZIPS < <(
+              find . -maxdepth 1 -type f \
+                -regextype posix-extended \
+                -regex './MonAgendaAlarmes-[0-9]+\.[0-9]+\.[0-9]+\.zip' \
+                -printf '%f\n' | sort -V
+            )
+            if [ "${#PROJECT_ZIPS[@]}" -eq 0 ]; then
+              echo "::error::Aucune archive MonAgendaAlarmes-X.Y.Z.zip trouvée"
+              exit 1
+            fi
+            PROJECT_ZIP="${PROJECT_ZIPS[-1]}"
           fi
+
           echo "Archive sélectionnée : $PROJECT_ZIP"
           unzip -o "$PROJECT_ZIP" -d extracted
+
           PROJECT_ROOT=$(find extracted -type f -path "*/app/build.gradle.kts" -print -quit | sed 's|/app/build.gradle.kts$||')
           if [ -z "$PROJECT_ROOT" ]; then
-            echo "ERREUR : app/build.gradle.kts introuvable dans le ZIP"
-            find extracted -maxdepth 5 -type f
+            echo "::error::Projet Android introuvable dans l'archive"
             exit 1
           fi
-          echo "Projet trouvé dans : $PROJECT_ROOT"
+
           cp -a "$PROJECT_ROOT"/. "$GITHUB_WORKSPACE"/
 
       - name: Vérifier le projet
@@ -56,7 +86,7 @@ jobs:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
           if [ -z "$DEBUG_KEYSTORE_BASE64" ]; then
-            echo "::error::Secret DEBUG_KEYSTORE_BASE64 absent dans Settings > Secrets and variables > Actions"
+            echo "::error::Secret DEBUG_KEYSTORE_BASE64 absent"
             exit 1
           fi
           mkdir -p "$HOME/.android"
@@ -74,7 +104,7 @@ jobs:
           source = path.read_text(encoding="utf-8")
           match = re.search(r"(?m)^(\s*versionCode\s*=\s*)(\d+)", source)
           if not match:
-              raise SystemExit("ERREUR : déclaration versionCode introuvable dans app/build.gradle.kts")
+              raise SystemExit("versionCode introuvable")
           current = int(match.group(2))
           updated = max(current + 1, int(os.environ["RUN_NUMBER"]))
           source = source[:match.start(2)] + str(updated) + source[match.end(2):]
@@ -82,7 +112,7 @@ jobs:
           print(f"versionCode : {current} -> {updated}")
           PY
 
-      - name: Compiler APK signée avec la clé persistante
+      - name: Compiler APK
         run: gradle --no-daemon :app:assembleDebug
 
       - name: Vérifier et renommer APK
@@ -97,3 +127,4 @@ jobs:
           path: MonAgendaAlarmes.apk
           if-no-files-found: error
           retention-days: 30
+
