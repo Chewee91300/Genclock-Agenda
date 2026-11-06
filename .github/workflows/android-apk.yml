@@ -5,10 +5,10 @@ on:
   workflow_dispatch:
     inputs:
       archive_name:
-        description: "Nom exact de l'archive à compiler (vide = dernière version)"
+        description: "Nom exact de l'archive à compiler"
         required: false
         type: string
-        default: ""
+        default: "Bellendar-1.0.1.zip"
 
   push:
     branches:
@@ -24,26 +24,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Récupération du dépôt
       - name: Récupérer le dépôt
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2. Installation Java
       - name: Installer Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # 3. Installation Gradle
       - name: Installer Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '8.9'
 
-      # 4. Sélection automatique de la bonne archive
       - name: Sélectionner et décompresser la bonne archive
         env:
           REQUESTED_ARCHIVE: ${{ inputs.archive_name }}
@@ -51,59 +47,67 @@ jobs:
           set -euo pipefail
           mkdir -p extracted
 
-          if [ -n "$REQUESTED_ARCHIVE" ]; then
-
-            if [[ ! "$REQUESTED_ARCHIVE" =~ ^Bellendar-[0-9]+\.[0-9]+\.[0-9]+\.zip$ ]]; then
-              echo "::error::Nom d'archive invalide."
-              exit 1
-            fi
-
-            if [ ! -f "$REQUESTED_ARCHIVE" ]; then
-              echo "::error::Archive introuvable : $REQUESTED_ARCHIVE"
-              exit 1
-            fi
-
-            PROJECT_ZIP="$REQUESTED_ARCHIVE"
-
-          else
-
-            mapfile -t PROJECT_ZIPS < <(
-              find . -maxdepth 1 -type f \
-                -regextype posix-extended \
-                -regex './Bellendar-[0-9]+\.[0-9]+\.[0-9]+\.zip' \
-                -printf '%f\n' | sort -V
-            )
-
-            if [ "${#PROJECT_ZIPS[@]}" -eq 0 ]; then
-              echo "::error::Aucune archive valide trouvée."
-              exit 1
-            fi
-
-            PROJECT_ZIP="${PROJECT_ZIPS[-1]}"
+          if [ -z "$REQUESTED_ARCHIVE" ]; then
+            REQUESTED_ARCHIVE="Bellendar-1.0.1.zip"
           fi
 
-          echo "Archive sélectionnée : $PROJECT_ZIP"
-
-          unzip -o "$PROJECT_ZIP" -d extracted
-
-          PROJECT_ROOT=$(find extracted -type f \
-            -path "*/app/build.gradle.kts" \
-            -print -quit | sed 's|/app/build.gradle.kts$||')
-
-          if [ -z "$PROJECT_ROOT" ]; then
-            echo "::error::Projet Android introuvable."
+          if [[ ! "$REQUESTED_ARCHIVE" =~ ^Bellendar-[0-9]+\.[0-9]+\.[0-9]+\.zip$ ]]; then
+            echo "::error::Nom d'archive invalide."
             exit 1
           fi
 
+          if [ ! -f "$REQUESTED_ARCHIVE" ]; then
+            echo "::error::Archive introuvable : $REQUESTED_ARCHIVE"
+            exit 1
+          fi
+
+          PROJECT_ZIP="$REQUESTED_ARCHIVE"
+          echo "ARCHIVE_SELECTIONNEE=$PROJECT_ZIP" >> "$GITHUB_ENV"
+
+          echo "Archive sélectionnée : $PROJECT_ZIP"
+          sha256sum "$PROJECT_ZIP"
+
+          unzip -o "$PROJECT_ZIP" -d extracted
+
+          mapfile -t PROJECT_ROOTS < <(
+            find extracted -type f \
+              -path "*/app/build.gradle.kts" \
+              -print | sed 's|/app/build.gradle.kts$||' | sort -u
+          )
+
+          if [ "${#PROJECT_ROOTS[@]}" -ne 1 ]; then
+            echo "::error::Un seul projet Android est attendu."
+            printf '%s\n' "${PROJECT_ROOTS[@]}"
+            exit 1
+          fi
+
+          PROJECT_ROOT="${PROJECT_ROOTS[0]}"
           cp -a "$PROJECT_ROOT"/. "$GITHUB_WORKSPACE"/
 
-      # 5. Vérification du projet
-      - name: Vérifier le projet
+      - name: Vérifier le projet et afficher les sources compilées
         run: |
+          set -euo pipefail
+
           test -f app/build.gradle.kts
           test -f settings.gradle.kts
+          test -f app/src/main/java/fr/bellendar/UiTranslations.kt
 
-      # 6. Préparation de la clé de signature
+          echo "Archive compilée : $ARCHIVE_SELECTIONNEE"
+          sha256sum app/src/main/java/fr/bellendar/UiTranslations.kt
+
+          echo "Lignes 1158 à 1162 :"
+          nl -ba app/src/main/java/fr/bellendar/UiTranslations.kt | sed -n '1158,1162p'
+
+          echo "Longueur de la ligne 1160 :"
+          python3 - <<'PY'
+          from pathlib import Path
+          lines = Path("app/src/main/java/fr/bellendar/UiTranslations.kt").read_text(encoding="utf-8").splitlines()
+          print(len(lines[1159]) if len(lines) >= 1160 else f"Fichier de {len(lines)} lignes")
+          PY
+
+          echo "Version du projet :"
+          grep -E 'versionCode|versionName' app/build.gradle.kts
+
       - name: Préparer la clé de signature persistante
         env:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
@@ -125,50 +129,11 @@ jobs:
             -storepass android \
             -alias androiddebugkey
 
-      # 7. Incrémentation automatique du versionCode
-      - name: Incrémenter automatiquement versionCode
-        env:
-          RUN_NUMBER: ${{ github.run_number }}
-        run: |
-          python3 - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          path = Path("app/build.gradle.kts")
-          source = path.read_text(encoding="utf-8")
-
-          match = re.search(
-              r"(?m)^(\s*versionCode\s*=\s*)(\d+)",
-              source
-          )
-
-          if not match:
-              raise SystemExit("versionCode introuvable.")
-
-          current = int(match.group(2))
-          updated = max(
-              current + 1,
-              int(os.environ["RUN_NUMBER"])
-          )
-
-          source = (
-              source[:match.start(2)]
-              + str(updated)
-              + source[match.end(2):]
-          )
-
-          path.write_text(source, encoding="utf-8")
-
-          print(f"versionCode : {current} -> {updated}")
-          PY
-
-      # 8. Compilation APK
+      # Aucune incrémentation automatique du versionCode.
+      # Les valeurs du ZIP sont conservées.
       - name: Compiler APK
-        run: |
-          gradle --no-daemon :app:assembleDebug
+        run: gradle --no-daemon :app:assembleDebug
 
-      # 9. Vérification de l'APK
       - name: Vérifier et renommer APK
         run: |
           set -euo pipefail
@@ -178,7 +143,6 @@ jobs:
           cp app/build/outputs/apk/debug/app-debug.apk \
             Bellendar.apk
 
-      # 10. Publication de l'APK
       - name: Publier APK
         uses: actions/upload-artifact@v7
         with:
@@ -187,14 +151,11 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # 11. Nettoyage automatique des anciennes archives
       - name: Nettoyer les anciennes versions ZIP
         if: success() && github.ref == 'refs/heads/main'
         shell: bash
         run: |
           set -euo pipefail
-
-          echo "Recherche des archives MonAgendaAlarmes..."
 
           mapfile -t VERSIONS < <(
             find . -maxdepth 1 -type f \
@@ -205,19 +166,16 @@ jobs:
 
           COUNT=${#VERSIONS[@]}
 
-          echo "Nombre d'archives trouvées : $COUNT"
-
           if [ "$COUNT" -le 2 ]; then
-            echo "Deux versions ou moins : aucune suppression."
+            echo "Deux archives ou moins : aucune suppression."
             exit 0
           fi
 
-          echo "Versions conservées :"
+          echo "Archives conservées :"
           echo "${VERSIONS[0]}"
           echo "${VERSIONS[1]}"
 
           for ((i=2; i<COUNT; i++)); do
-            echo "Suppression : ${VERSIONS[$i]}"
             git rm -- "${VERSIONS[$i]}"
           done
 
@@ -226,5 +184,4 @@ jobs:
             "41898282+github-actions[bot]@users.noreply.github.com"
 
           git commit -m "Nettoyage automatique des anciennes versions ZIP"
-
           git push origin HEAD:main
