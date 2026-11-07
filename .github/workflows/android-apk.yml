@@ -1,3 +1,4 @@
+```yaml
 name: Construire APK Android
 
 on:
@@ -71,15 +72,12 @@ jobs:
             exit 1
           fi
 
-          PROJECT_ZIP="$REQUESTED_ARCHIVE"
-          echo "ARCHIVE_SELECTIONNEE=$PROJECT_ZIP" >> "$GITHUB_ENV"
+          echo "ARCHIVE_SELECTIONNEE=$REQUESTED_ARCHIVE" >> "$GITHUB_ENV"
 
-          echo "=================================="
-          echo "ARCHIVE SÉLECTIONNÉE : $PROJECT_ZIP"
-          echo "=================================="
-          sha256sum "$PROJECT_ZIP"
+          echo "Archive sélectionnée : $REQUESTED_ARCHIVE"
+          sha256sum "$REQUESTED_ARCHIVE"
 
-          unzip -o "$PROJECT_ZIP" -d extracted
+          unzip -o "$REQUESTED_ARCHIVE" -d extracted
 
           mapfile -t PROJECT_ROOTS < <(
             find extracted -type f \
@@ -89,26 +87,34 @@ jobs:
 
           if [ "${#PROJECT_ROOTS[@]}" -ne 1 ]; then
             echo "::error::Un seul projet Android est attendu."
-            printf '%s\\n' "${PROJECT_ROOTS[@]}"
+            printf '%s\n' "${PROJECT_ROOTS[@]}"
             exit 1
           fi
 
           PROJECT_ROOT="${PROJECT_ROOTS[0]}"
           cp -a "$PROJECT_ROOT"/. "$GITHUB_WORKSPACE"/
 
-      - name: Vérifier le projet et afficher les sources compilées
+      - name: Vérifier le projet et lire la version
         run: |
           set -euo pipefail
 
           test -f app/build.gradle.kts
           test -f settings.gradle.kts
-          test -f app/src/main/java/fr/bellendar/UiTranslations.kt
 
-          echo "Archive compilée : $ARCHIVE_SELECTIONNEE"
-          sha256sum app/src/main/java/fr/bellendar/UiTranslations.kt
+          VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -n 1)
+          VERSION_CODE=$(grep -oP 'versionCode\s*=\s*\K[0-9]+' app/build.gradle.kts | head -n 1)
 
-          echo "Version du projet :"
-          grep -E 'versionCode|versionName' app/build.gradle.kts
+          if [ -z "$VERSION_NAME" ] || [ -z "$VERSION_CODE" ]; then
+            echo "::error::Version introuvable."
+            exit 1
+          fi
+
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+
+          echo "Archive : $ARCHIVE_SELECTIONNEE"
+          echo "Version : $VERSION_NAME"
+          echo "VersionCode : $VERSION_CODE"
 
       - name: Préparer la clé de signature persistante
         env:
@@ -131,8 +137,6 @@ jobs:
             -storepass android \
             -alias androiddebugkey
 
-      # Aucune incrémentation automatique du versionCode.
-      # Les valeurs présentes dans le ZIP sont conservées.
       - name: Compiler APK
         run: gradle --no-daemon :app:assembleDebug
 
@@ -140,16 +144,26 @@ jobs:
         run: |
           set -euo pipefail
 
-          test -f app/build/outputs/apk/debug/app-debug.apk
+          APK_SOURCE="app/build/outputs/apk/debug/app-debug.apk"
+          APK_NAME="Bellendar-${VERSION_NAME}.apk"
 
-          cp app/build/outputs/apk/debug/app-debug.apk \
-            Bellendar.apk
+          test -f "$APK_SOURCE"
 
-      - name: Publier APK
+          cp "$APK_SOURCE" "$APK_NAME"
+
+          echo "APK généré : $APK_NAME"
+          ls -lh "$APK_NAME"
+
+          # Vérification du format APK et de sa signature.
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)/aapt" dump badging "$APK_NAME" | head -n 1
+
+          apksigner verify "$APK_NAME"
+
+      - name: Publier APK directement
         uses: actions/upload-artifact@v7
         with:
-          name: Bellendar
-          path: Bellendar.apk
+          name: Bellendar-${{ env.VERSION_NAME }}
+          path: Bellendar-${{ env.VERSION_NAME }}.apk
           if-no-files-found: error
           retention-days: 30
 
@@ -187,3 +201,4 @@ jobs:
 
           git commit -m "Nettoyage automatique des anciennes versions ZIP"
           git push origin HEAD:main
+```
