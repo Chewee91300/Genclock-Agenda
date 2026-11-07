@@ -107,16 +107,6 @@ steps:
       echo "Archive compilée : $ARCHIVE_SELECTIONNEE"
       sha256sum app/src/main/java/fr/bellendar/UiTranslations.kt
 
-      echo "Lignes 1158 à 1162 :"
-      nl -ba app/src/main/java/fr/bellendar/UiTranslations.kt | sed -n '1158,1162p'
-
-      echo "Longueur de la ligne 1160 :"
-      python3 - <<'PY'
-      from pathlib import Path
-      lines = Path("app/src/main/java/fr/bellendar/UiTranslations.kt").read_text(encoding="utf-8").splitlines()
-      print(len(lines[1159]) if len(lines) >= 1160 else f"Fichier de {len(lines)} lignes")
-      PY
-
       echo "Version du projet :"
       grep -E 'versionCode|versionName' app/build.gradle.kts
 
@@ -142,7 +132,7 @@ steps:
         -alias androiddebugkey
 
   # Aucune incrémentation automatique du versionCode.
-  # Les valeurs du ZIP sont conservées.
+  # Les valeurs présentes dans le ZIP sont conservées.
   - name: Compiler APK
     run: gradle --no-daemon :app:assembleDebug
 
