@@ -8,7 +8,7 @@ on:
         description: "Nom exact de l'archive à compiler"
         required: false
         type: string
-        default: "Bellendar-1.0.1.zip"
+        default: "Bellendar-1.0.6.zip"
 
   push:
     branches:
@@ -48,7 +48,7 @@ jobs:
           mkdir -p extracted
 
           if [ -z "$REQUESTED_ARCHIVE" ]; then
-            REQUESTED_ARCHIVE="Bellendar-1.0.1.zip"
+            REQUESTED_ARCHIVE="Bellendar-1.0.6.zip"
           fi
 
           if [[ ! "$REQUESTED_ARCHIVE" =~ ^Bellendar-[0-9]+\.[0-9]+\.[0-9]+\.zip$ ]]; then
