@@ -200,4 +200,3 @@ jobs:
 
           git commit -m "Nettoyage automatique des anciennes versions ZIP"
           git push origin HEAD:main
-```
